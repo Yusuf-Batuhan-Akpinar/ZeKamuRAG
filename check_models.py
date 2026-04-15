@@ -2,7 +2,10 @@
 import google.generativeai as genai
 import os
 
-api_key = os.getenv("GOOGLE_API_KEY", "AIzaSyAnPBEZG9L19iupfuJVuo-ZJhNOn567BvQ")
+api_key = os.getenv("GOOGLE_API_KEY")
+if not api_key:
+    print("Hata: GOOGLE_API_KEY bulunamadı. Lütfen environment variable olarak tanımlayın.")
+    exit(1)
 genai.configure(api_key=api_key)
 
 print("Available models:")
