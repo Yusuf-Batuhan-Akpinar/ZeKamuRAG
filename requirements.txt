@@ -1,26 +1,30 @@
 # TÜBİTAK RAG Projesi - Gerekli Kütüphaneler
 
 # UI Framework
-streamlit==1.31.0
+streamlit>=1.40.0
 
 # Google Gemini API
-google-generativeai==0.3.2
+google-generativeai>=0.8.0
 
 # LangChain ve ilgili paketler
-langchain==0.1.6
-langchain-community==0.0.19
-langchain-google-genai==0.0.6
+langchain>=1.0.0
+langchain-core>=0.3.0
+langchain-community>=0.3.0
+langchain-google-genai>=2.0.0
+langchain-text-splitters>=0.3.0
 
 # Vektör Veritabanı
-faiss-cpu==1.7.4
+faiss-cpu>=1.9.0
+
+# Lokal Embedding (bedava, rate limit yok)
+sentence-transformers>=3.0.0
+langchain-huggingface>=0.1.0
 
 # PDF İşleme
-pypdf==4.0.1
-pymupdf==1.23.21
+pypdf>=4.0.0
 
 # Çevre Değişkenleri
-python-dotenv
+python-dotenv>=1.0.0
 
 # Yardımcı Kütüphaneler
-python-dotenv==1.0.1
-tiktoken==0.5.2
+tiktoken>=0.7.0

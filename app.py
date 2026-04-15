@@ -5,18 +5,25 @@ Google Gemini API ile Belge Tabanlı Soru-Cevap Sistemi
 
 import streamlit as st
 import os
+import time
+import json
+import re
+import datetime
 from dotenv import load_dotenv
 from pathlib import Path
-import google.generativeai as genai
 
 # Çevre değişkenlerini yükle (.env dosyasından)
 load_dotenv()
-from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
+
+import google.generativeai as genai
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.document_loaders import PyPDFLoader, DirectoryLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
-from langchain.chains import RetrievalQA
-from langchain.prompts import PromptTemplate
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.runnables import RunnablePassthrough
 
 # Sayfa yapılandırması
 st.set_page_config(
@@ -153,7 +160,8 @@ class RAGSystem:
         self.data_folder = data_folder
         self.vector_db_path = vector_db_path
         self.vectorstore = None
-        self.qa_chain = None
+        self.rag_chain = None
+        self.retriever = None
         
         # API Key kontrolü
         self.api_key = os.getenv("GOOGLE_API_KEY")
@@ -163,17 +171,18 @@ class RAGSystem:
         # Gemini API yapılandırması
         genai.configure(api_key=self.api_key)
         
-        # Embeddings ve LLM modellerini başlat
-        self.embeddings = GoogleGenerativeAIEmbeddings(
-            model="models/text-embedding-004",
-            google_api_key=self.api_key
+        # Embeddings - LOKAL model (bedava, sınırsız, Türkçe destekli)
+        self.embeddings = HuggingFaceEmbeddings(
+            model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+            model_kwargs={"device": "cpu"},
+            encode_kwargs={"normalize_embeddings": True}
         )
         
+        # LLM - Gemini API (sadece soru-cevap için, çok az istek)
         self.llm = ChatGoogleGenerativeAI(
             model="gemini-2.5-flash",
             google_api_key=self.api_key,
-            temperature=0.3,
-            convert_system_message_to_human=True
+            temperature=0.3
         )
     
     def load_documents(self):
@@ -184,92 +193,111 @@ class RAGSystem:
             os.makedirs(self.data_folder)
             return []
         
-        # PDF dosyalarını yükle
-        loader = DirectoryLoader(
-            self.data_folder,
-            glob="**/*.pdf",
-            loader_cls=PyPDFLoader,
-            show_progress=True
-        )
+        # PDF dosyalarını tek tek yükle (hata toleransı için)
+        documents = []
+        pdf_files = list(Path(self.data_folder).rglob("*.pdf"))
         
-        documents = loader.load()
+        if not pdf_files:
+            return []
+        
+        for pdf_path in pdf_files:
+            try:
+                loader = PyPDFLoader(str(pdf_path))
+                docs = loader.load()
+                documents.extend(docs)
+            except Exception as e:
+                st.warning(f"⚠️ {pdf_path.name} yüklenemedi: {e}")
+                continue
+        
         return documents
     
     def split_documents(self, documents):
         """Belgeleri küçük parçalara böl (chunking)"""
         
         text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1000,  # Her parça maksimum 1000 karakter
-            chunk_overlap=200,  # Parçalar arası 200 karakter örtüşme
+            chunk_size=5000,   # Büyük chunk → daha az embedding isteği → rate limit sorunu azalır
+            chunk_overlap=300,  # Yeterli bağlam korunur
             length_function=len,
-            separators=["\n\n", "\n", " ", ""]
+            separators=["\n\n", "\n", ". ", " ", ""]
         )
         
         chunks = text_splitter.split_documents(documents)
         return chunks
-    
+
     def create_vectorstore(self, chunks):
-        """Vektör veritabanı oluştur ve kaydet"""
+        """Vektör veritabanı oluştur - lokal embedding, rate limit yok"""
         
-        # FAISS vektör veritabanı oluştur
-        self.vectorstore = FAISS.from_documents(
-            documents=chunks,
-            embedding=self.embeddings
-        )
+        total = len(chunks)
+        st.info(f"📊 {total} parça lokal olarak embed ediliyor (rate limit yok)...")
         
-        # Veritabanını diske kaydet
-        self.vectorstore.save_local(self.vector_db_path)
+        try:
+            self.vectorstore = FAISS.from_documents(
+                documents=chunks,
+                embedding=self.embeddings
+            )
+            self.vectorstore.save_local(self.vector_db_path)
+            st.success(f"✅ {total} parça başarıyla embed edildi ve kaydedildi!")
+        except Exception as e:
+            raise Exception(f"Embedding hatası: {str(e)}")
         
         return self.vectorstore
     
     def load_vectorstore(self):
         """Kaydedilmiş vektör veritabanını yükle"""
         
-        if os.path.exists(self.vector_db_path):
+        index_file = os.path.join(self.vector_db_path, "index.faiss")
+        if os.path.exists(index_file):
             self.vectorstore = FAISS.load_local(
                 self.vector_db_path,
-                self.embeddings
+                self.embeddings,
+                allow_dangerous_deserialization=True
             )
             return True
         return False
     
     def create_qa_chain(self):
-        """Soru-Cevap zinciri oluştur"""
+        """Soru-Cevap zinciri oluştur (LCEL)"""
         
-        # Özel prompt şablonu - Halüsinasyonu önlemek için
-        prompt_template = """
-        Sen bir uzman asistansın. Sadece verilen belgelerdeki bilgileri kullanarak soruları yanıtla.
-        Eğer sorunun cevabı belgelerde yoksa, "Bu bilgi belgelerde mevcut değil" de.
-        Asla bilgi uydurma veya belge dışı bilgi kullanma.
+        if not self.vectorstore:
+            raise ValueError("Vektör veritabanı yüklenmemiş!")
         
-        Bağlam: {context}
+        self.retriever = self.vectorstore.as_retriever(search_kwargs={"k": 5})
         
-        Soru: {question}
-        
-        Detaylı Cevap:"""
-        
-        PROMPT = PromptTemplate(
-            template=prompt_template,
-            input_variables=["context", "question"]
+        # Prompt şablonu
+        prompt = ChatPromptTemplate.from_template(
+            """Sen Türkiye'deki kamu mali yönetimi ve denetim konularında uzman bir asistansın.
+Aşağıda sana verilen belge parçalarını dikkatlice oku ve soruyu bu bilgilere dayanarak yanıtla.
+Cevabın belgelerden çıkarılabilecek bilgilere dayanmalıdır.
+Eğer sorunun cevabı verilen belgelerde hiç geçmiyorsa, bunu belirt.
+
+Belge Parçaları:
+{context}
+
+Soru: {question}
+
+Yanıt:"""
         )
         
-        # RetrievalQA zinciri oluştur
-        self.qa_chain = RetrievalQA.from_chain_type(
-            llm=self.llm,
-            chain_type="stuff",
-            retriever=self.vectorstore.as_retriever(
-                search_kwargs={"k": 3}  # En alakalı 3 belge parçasını getir
-            ),
-            return_source_documents=True,
-            chain_type_kwargs={"prompt": PROMPT}
+        # LCEL zinciri
+        def format_docs(docs):
+            return "\n\n".join(doc.page_content for doc in docs)
+        
+        self.rag_chain = (
+            {"context": self.retriever | format_docs, "question": RunnablePassthrough()}
+            | prompt
+            | self.llm
+            | StrOutputParser()
         )
         
-        return self.qa_chain
+        return self.rag_chain
     
     def initialize(self):
         """Sistemi başlat - belgeler yoksa yükle, varsa hazır"""
         
-        # Önce kaydedilmiş vektör DB'yi yüklemeyi dene
+        # Vektör DB klasörü yoksa oluştur
+        os.makedirs(self.vector_db_path, exist_ok=True)
+        
+        # Tamamlanmış vektör DB var mı?
         if self.load_vectorstore():
             self.create_qa_chain()
             return "Sistem hazır (Mevcut vektör veritabanı yüklendi)"
@@ -280,7 +308,9 @@ class RAGSystem:
         if len(documents) == 0:
             return f"UYARI: {self.data_folder}/ klasöründe PDF dosyası bulunamadı!"
         
+        st.info(f"📚 {len(documents)} sayfa yüklendi, parçalanıyor...")
         chunks = self.split_documents(documents)
+        st.info(f"🔗 {len(chunks)} parça oluşturuldu, embedding başlıyor...")
         self.create_vectorstore(chunks)
         self.create_qa_chain()
         
@@ -291,8 +321,6 @@ class RAGSystem:
         Gelişmiş Şeffaflık Puanı Hesaplama Algoritması
         4 Temel Kriter: Erişilebilirlik, Hesap Verebilirlik, Güncellik, Tutarlılık
         """
-        import re
-        import datetime
         
         scores = {
             "accessibility": 0,
@@ -368,15 +396,23 @@ class RAGSystem:
     def query(self, question):
         """Soru sor ve cevap al"""
         
-        if not self.qa_chain:
+        if not self.rag_chain:
             return {"answer": "Sistem henüz hazır değil!", "source_documents": []}
         
         try:
-            response = self.qa_chain.invoke({"query": question})
+            # Kaynak belgeleri al
+            source_docs = self.retriever.invoke(question)
+            
+            # Cevabı üret
+            answer = self.rag_chain.invoke(question)
+            
+            # DEBUG: Eğer cevap bulunamadıysa, bağlamı kontrol et
+            if not source_docs:
+                answer = "Belgelerde bu konuyla ilgili parça bulunamadı. Lütfen farklı kelimelerle tekrar deneyin."
             
             # Kaynak belgeler için şeffaflık analizi
             processed_sources = []
-            for doc in response["source_documents"]:
+            for doc in source_docs:
                 total_score, details = self.calculate_transparency_score(doc.page_content)
                 processed_sources.append({
                     "content": doc.page_content,
@@ -387,12 +423,19 @@ class RAGSystem:
                 })
             
             return {
-                "answer": response["result"],
+                "answer": answer,
                 "source_documents": processed_sources
             }
         except Exception as e:
+            error_msg = str(e)
+            if any(x in error_msg for x in ["429", "RESOURCE_EXHAUSTED", "quota"]):
+                user_msg = "API istek limiti aşıldı. Lütfen birkaç dakika bekleyip tekrar deneyin."
+            elif "API_KEY" in error_msg or "401" in error_msg or "403" in error_msg:
+                user_msg = "API anahtarı geçersiz veya eksik. Lütfen .env dosyanızı kontrol edin."
+            else:
+                user_msg = f"Bir hata oluştu: {error_msg}"
             return {
-                "answer": f"Bir hata oluştu: {str(e)}\n\nLütfen API anahtarınızı ve internet bağlantınızı kontrol edin.",
+                "answer": user_msg,
                 "source_documents": []
             }
 
