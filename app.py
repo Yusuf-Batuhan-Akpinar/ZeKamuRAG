@@ -1,6 +1,6 @@
 """
 TÜBİTAK RAG Projesi - Ana Uygulama
-Google Gemini API ile Belge Tabanlı Soru-Cevap Sistemi
+Groq API ile Belge Tabanlı Soru-Cevap Sistemi
 """
 
 import streamlit as st
@@ -15,8 +15,7 @@ from pathlib import Path
 # Çevre değişkenlerini yükle (.env dosyasından)
 load_dotenv()
 
-import google.generativeai as genai
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_groq import ChatGroq
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.document_loaders import PyPDFLoader, DirectoryLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -164,12 +163,9 @@ class RAGSystem:
         self.retriever = None
         
         # API Key kontrolü
-        self.api_key = os.getenv("GOOGLE_API_KEY")
+        self.api_key = os.getenv("GROQ_API_KEY")
         if not self.api_key:
-            raise ValueError("GOOGLE_API_KEY environment variable bulunamadı! Lütfen .env dosyasını kontrol edin.")
-        
-        # Gemini API yapılandırması
-        genai.configure(api_key=self.api_key)
+            raise ValueError("GROQ_API_KEY environment variable bulunamadı! Lütfen .env dosyasını kontrol edin.")
         
         # Embeddings - LOKAL model (bedava, sınırsız, Türkçe destekli)
         self.embeddings = HuggingFaceEmbeddings(
@@ -178,10 +174,10 @@ class RAGSystem:
             encode_kwargs={"normalize_embeddings": True}
         )
         
-        # LLM - Gemini API (sadece soru-cevap için, çok az istek)
-        self.llm = ChatGoogleGenerativeAI(
-            model="gemini-2.5-flash",
-            google_api_key=self.api_key,
+        # LLM - Groq API (hızlı ve uygun fiyatlı)
+        self.llm = ChatGroq(
+            model="openai/gpt-oss-120b",
+            groq_api_key=self.api_key,
             temperature=0.3
         )
     
@@ -247,12 +243,16 @@ class RAGSystem:
         
         index_file = os.path.join(self.vector_db_path, "index.faiss")
         if os.path.exists(index_file):
-            self.vectorstore = FAISS.load_local(
-                self.vector_db_path,
-                self.embeddings,
-                allow_dangerous_deserialization=True
-            )
-            return True
+            try:
+                self.vectorstore = FAISS.load_local(
+                    self.vector_db_path,
+                    self.embeddings,
+                    allow_dangerous_deserialization=True
+                )
+                return True
+            except Exception as e:
+                print(f"Vektör DB yükleme hatası: {e}")
+                return False
         return False
     
     def create_qa_chain(self):
