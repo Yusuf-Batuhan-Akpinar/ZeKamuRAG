@@ -26,130 +26,186 @@ from langchain_core.runnables import RunnablePassthrough
 
 # Sayfa yapılandırması
 st.set_page_config(
-    page_title="TÜBİTAK RAG Sistemi",
+    page_title="Nexus AI - TÜBİTAK Bilgi Asistanı",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# CSS ile özel stil (Gemini Dark Mode - Gelişmiş)
+# CSS ile profesyonel stil (Nexus AI - Modern Dark Mode)
 st.markdown("""
     <style>
+    @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap');
+    
+    * {
+        font-family: 'Inter', sans-serif;
+    }
+    
     /* Ana Arka Plan */
     .stApp {
-        background-color: #131314;
+        background: linear-gradient(135deg, #0F1419 0%, #1a1f2e 100%);
         color: #E3E3E3;
     }
     
     /* Sidebar */
     [data-testid="stSidebar"] {
-        background-color: #1E1F20;
-        border-right: 1px solid #444746;
+        background: linear-gradient(180deg, #0F1419 0%, #1a1f2e 100%);
+        border-right: 1px solid #2d3748;
+    }
+    
+    /* Sidebar Başlık */
+    [data-testid="stSidebar"] h1 {
+        color: #0ea5e9 !important;
+        font-family: 'Poppins', sans-serif;
+        font-weight: 700;
+        font-size: 1.8em !important;
+        margin-bottom: 2rem;
     }
     
     /* Başlıklar */
     h1, h2, h3 {
-        color: #E3E3E3 !important;
-        font-family: 'Google Sans', sans-serif;
-        font-weight: 500;
+        color: #ffffff !important;
+        font-family: 'Poppins', sans-serif;
+        font-weight: 600;
     }
     
     /* Metinler */
     p, span, div, label {
-        color: #C4C7C5;
-        font-family: 'Roboto', sans-serif;
+        color: #cbd5e0;
+        font-family: 'Inter', sans-serif;
     }
     
     /* Mesaj Kutuları - Kullanıcı */
     .stChatMessage[data-testid="stChatMessage"]:nth-child(odd) {
-        background-color: #282A2C;
-        border-radius: 20px;
-        border: none;
-        margin: 10px 0;
+        background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+        border-radius: 16px;
+        border: 1px solid #334155;
+        margin: 12px 0;
+        padding: 16px;
     }
     
     /* Mesaj Kutuları - Asistan */
     .stChatMessage[data-testid="stChatMessage"]:nth-child(even) {
-        background-color: transparent;
-        border: none;
-        padding: 0;
-        margin: 10px 0;
+        background: linear-gradient(135deg, #0ea5e933 0%, #3b82f633 100%);
+        border: 1px solid #0ea5e944;
+        border-radius: 16px;
+        margin: 12px 0;
+        padding: 16px;
     }
     
     /* Kaynak Kartları */
     .source-card {
-        background-color: #1E1F20;
-        border: 1px solid #444746;
+        background: linear-gradient(135deg, #1e2139 0%, #1a2d42 100%);
+        border: 1px solid #2d3748;
+        border-left: 4px solid #0ea5e9;
         border-radius: 12px;
         padding: 15px;
         margin-top: 10px;
         margin-bottom: 10px;
+        transition: all 0.3s ease;
+    }
+    .source-card:hover {
+        border-left-color: #3b82f6;
+        box-shadow: 0 4px 12px rgba(14, 165, 233, 0.2);
     }
     .source-header {
-        color: #A8C7FA !important;
-        font-weight: bold;
-        font-size: 0.9em;
-        margin-bottom: 5px;
+        color: #0ea5e9 !important;
+        font-weight: 600;
+        font-size: 0.95em;
+        margin-bottom: 8px;
     }
     .transparency-score {
         display: inline-block;
-        padding: 2px 8px;
-        border-radius: 12px;
-        font-size: 0.8em;
-        font-weight: bold;
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: 0.85em;
+        font-weight: 600;
         margin-left: 10px;
     }
-    .score-high { background-color: #0F5223; color: #6DD58C !important; }
-    .score-med { background-color: #5B4300; color: #FFD666 !important; }
-    .score-low { background-color: #601410; color: #FFB4AB !important; }
+    .score-high { background-color: #0ea5e944; color: #7dd3fc !important; }
+    .score-med { background-color: #f59e0b44; color: #fcd34d !important; }
+    .score-low { background-color: #ef444444; color: #fca5a5 !important; }
     
-    /* Butonlar - İÇİNDEKİ YAZIYI SİYAH YAP */
+    /* Butonlar */
     .stButton button {
-        background-color: #A8C7FA !important;
-        border-radius: 24px;
+        background: linear-gradient(135deg, #0ea5e9 0%, #3b82f6 100%) !important;
+        border-radius: 8px;
         border: none;
-        padding: 0.5rem 1.5rem;
-        transition: all 0.2s;
-    }
-    .stButton button p {
-        color: #040C19 !important; /* Buton yazısı kesinlikle koyu olacak */
-        font-weight: 600 !important;
+        padding: 0.6rem 1.8rem;
+        transition: all 0.3s ease;
+        font-weight: 600;
+        color: #ffffff !important;
     }
     .stButton button:hover {
-        background-color: #8AB4F8 !important;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+        transform: translateY(-2px);
+        box-shadow: 0 8px 16px rgba(14, 165, 233, 0.4);
+    }
+    .stButton button p {
+        color: #ffffff !important;
+        font-weight: 600 !important;
     }
     
-    /* Bilgi Kutucukları (Alerts) - Koyu Mod Uyumu */
+    /* Bilgi Kutucukları */
     .stAlert {
-        background-color: #1E1F20 !important;
-        border: 1px solid #444746;
-        color: #E3E3E3 !important;
+        background: linear-gradient(135deg, #1e2139 0%, #1a2d42 100%) !important;
+        border: 1px solid #2d3748;
+        border-left: 4px solid #0ea5e9;
+        color: #e2e8f0 !important;
+        border-radius: 8px;
     }
     .stAlert p {
-        color: #E3E3E3 !important; /* Alert içindeki yazılar açık renk */
+        color: #cbd5e0 !important;
     }
     
     /* Input Alanı */
     .stTextInput input {
-        background-color: #1E1F20 !important;
-        color: #E3E3E3 !important;
-        border: 1px solid #444746 !important;
-        border-radius: 24px;
-        padding: 12px 20px;
+        background-color: #1e293b !important;
+        color: #e2e8f0 !important;
+        border: 1px solid #334155 !important;
+        border-radius: 8px;
+        padding: 12px 16px;
+        transition: all 0.2s ease;
     }
     .stTextInput input:focus {
-        border-color: #A8C7FA !important;
-        box-shadow: 0 0 0 1px #A8C7FA;
+        border-color: #0ea5e9 !important;
+        box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.2) !important;
     }
     
-    /* Expander (Kaynaklar) */
+    /* Expander */
     .streamlit-expanderHeader {
-        background-color: #1E1F20 !important;
-        color: #E3E3E3 !important;
-        border-radius: 12px !important;
+        background-color: #1e2139 !important;
+        color: #e2e8f0 !important;
+        border-radius: 8px !important;
+        border: 1px solid #334155 !important;
+        transition: all 0.2s ease;
+    }
+    .streamlit-expanderHeader:hover {
+        background-color: #2d3748 !important;
+    }
+    
+    /* Select Box */
+    .stSelectbox select {
+        background-color: #1e293b !important;
+        color: #e2e8f0 !important;
+        border: 1px solid #334155 !important;
+    }
+    
+    /* Main Content Area */
+    .main {
+        padding: 2rem;
+    }
+    
+    /* Chat Input Container */
+    .stChatInputContainer {
+        background: transparent !important;
+        border-top: 1px solid #2d3748;
+        padding: 1.5rem 0;
     }
     </style>
     """, unsafe_allow_html=True)
+
+# Header ile başlık
+st.markdown("<h1 style='font-size: 2.5em; margin: 0; color: #0ea5e9; display: flex; align-items: center;'>⚡ &nbsp;&nbsp;ZeKamu</h1>", unsafe_allow_html=True)
+st.divider()
 
 
 class RAGSystem:
@@ -448,7 +504,8 @@ if "rag_system" not in st.session_state:
 
 # Sidebar - Sistem Durumu
 with st.sidebar:
-    st.title("TÜBİTAK RAG")
+    st.markdown("<h1 style='color: #0ea5e9; margin: 0; font-size: 1.8rem;'>Belge Asistanı</h1>", unsafe_allow_html=True)
+    st.divider()
     
     st.subheader("Sistem Durumu")
     status_placeholder = st.empty()
@@ -488,9 +545,6 @@ with st.sidebar:
     
     st.markdown("---")
     st.caption("Powered by Google Gemini")
-
-# Ana ekran - Chat arayüzü
-st.title("Belge Asistanı")
 
 # Chat mesajlarını göster
 for message in st.session_state.messages:
